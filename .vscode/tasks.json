@@ -1,0 +1,25 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start Uvicorn (8000)",
+      "type": "shell",
+      "command": "${workspaceFolder}/venv/Scripts/python.exe -m uvicorn web_app:app --host 127.0.0.1 --port 8000 --reload",
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true
+    },
+    {
+      "label": "Stop Uvicorn (8000)",
+      "type": "shell",
+      "command": "$proc = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess; if ($proc) { Stop-Process -Id $proc -Force; Write-Host \"Stopped PID $proc on :8000\" } else { Write-Host \"No listener on :8000\" }"
+    },
+    {
+      "label": "E2E: Current file (headed)",
+      "type": "shell",
+      "command": "${workspaceFolder}/venv/Scripts/python.exe -m pytest ${relativeFile} --headed -v --tb=short -s --base-url http://127.0.0.1:8000",
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": ["Start Uvicorn (8000)"],
+      "dependsOrder": "sequence"
+    }
+  ]
+}

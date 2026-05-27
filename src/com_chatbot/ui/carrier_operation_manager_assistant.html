@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMBOT - Carrier Operation Manager Assistant</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+  :root {
+    --q-bg: #0f1117;
+    --q-surface: #181c26;
+    --q-surface2: #1f2436;
+    --q-border: rgba(255,255,255,0.07);
+    --q-border2: rgba(255,255,255,0.13);
+    --q-accent: #06b6d4;
+    --q-accent-dim: rgba(6,182,212,0.12);
+    --q-accent-dim2: rgba(6,182,212,0.22);
+    --q-text: #e8eaf0;
+    --q-muted: #6b7280;
+    --q-muted2: #9ca3af;
+    --q-success: #10b981;
+    --q-danger: #ef4444;
+    --q-warning: #f59e0b;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--q-bg);
+    color: var(--q-text);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 16px;
+  }
+
+  #app {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--q-bg);
+    color: var(--q-text);
+    width: 100%;
+    max-width: 900px;
+    min-height: 680px;
+    position: relative;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas:
+      "header"
+      "chat"
+      "input";
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid var(--q-border2);
+  }
+
+  /* HEADER */
+  #header {
+    grid-area: header;
+    background: var(--q-surface);
+    border-bottom: 1px solid var(--q-border);
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .logo-area {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo-icon {
+    width: 32px;
+    height: 32px;
+    background: var(--q-accent);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .logo-icon svg { width: 18px; height: 18px; }
+
+  .logo-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+  }
+
+  .logo-text span:first-child {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--q-text);
+    letter-spacing: 0.02em;
+  }
+
+  .logo-text span:last-child {
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--q-muted);
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  /* Auth form */
+  .auth-form {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .auth-form input {
+    background: var(--q-surface2);
+    border: 1px solid var(--q-border2);
+    color: var(--q-text);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: 'DM Sans', sans-serif;
+    width: 140px;
+  }
+
+  .auth-form input:focus {
+    outline: none;
+    border-color: var(--q-accent);
+  }
+
+  .auth-form input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .auth-btn {
+    background: var(--q-accent);
+    color: #fff;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  .auth-btn:hover { opacity: 0.9; }
+  .auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .auth-btn.logout {
+    background: transparent;
+    border: 1px solid var(--q-danger);
+    color: var(--q-danger);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--q-danger);
+  }
+
+  .status-dot.connected { background: var(--q-success); }
+
+  /* CHAT */
+  #chat {
+    grid-area: chat;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .msg {
+    max-width: 85%;
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+  }
+
+  .msg.user {
+    align-self: flex-end;
+    background: var(--q-accent-dim2);
+    border: 1px solid var(--q-accent);
+    color: var(--q-text);
+    border-bottom-right-radius: 4px;
+  }
+
+  .msg.assistant {
+    align-self: flex-start;
+    background: var(--q-surface2);
+    border: 1px solid var(--q-border2);
+    color: var(--q-text);
+    border-bottom-left-radius: 4px;
+  }
+
+  .msg.system {
+    align-self: center;
+    background: transparent;
+    color: var(--q-muted);
+    font-size: 12px;
+    font-style: italic;
+  }
+
+  .msg.error {
+    align-self: center;
+    background: rgba(239,68,68,0.1);
+    border: 1px solid var(--q-danger);
+    color: var(--q-danger);
+    font-size: 12px;
+  }
+
+  .tool-activity {
+    align-self: flex-start;
+    color: var(--q-accent);
+    font-size: 11px;
+    font-style: italic;
+    padding: 2px 0;
+  }
+
+  .typing-indicator {
+    align-self: flex-start;
+    color: var(--q-muted2);
+    font-size: 12px;
+    padding: 4px 0;
+  }
+
+  .typing-indicator span {
+    animation: blink 1.4s infinite both;
+  }
+  .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes blink {
+    0%, 80%, 100% { opacity: 0.3; }
+    40% { opacity: 1; }
+  }
+
+  /* Welcome message */
+  .welcome {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--q-muted2);
+  }
+
+  .welcome h2 {
+    color: var(--q-accent);
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+
+  .welcome p {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .welcome .suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 20px;
+  }
+
+  .welcome .suggestion-btn {
+    background: var(--q-surface2);
+    border: 1px solid var(--q-border2);
+    color: var(--q-text);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+    transition: border-color 0.2s;
+  }
+
+  .welcome .suggestion-btn:hover {
+    border-color: var(--q-accent);
+    color: var(--q-accent);
+  }
+
+  /* INPUT */
+  #input-area {
+    grid-area: input;
+    background: var(--q-surface);
+    border-top: 1px solid var(--q-border);
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  #msg-input {
+    flex: 1;
+    background: var(--q-surface2);
+    border: 1px solid var(--q-border2);
+    color: var(--q-text);
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-family: 'DM Sans', sans-serif;
+    resize: none;
+    outline: none;
+    min-height: 40px;
+    max-height: 120px;
+  }
+
+  #msg-input:focus { border-color: var(--q-accent); }
+  #msg-input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  #send-btn {
+    background: var(--q-accent);
+    border: none;
+    color: #fff;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  #send-btn:hover { opacity: 0.9; }
+  #send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  #send-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Lock overlay */
+  .lock-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(15,17,23,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    backdrop-filter: blur(4px);
+  }
+
+  .lock-overlay .lock-msg {
+    color: var(--q-muted2);
+    font-size: 14px;
+    text-align: center;
+  }
+
+  .lock-overlay .lock-msg strong {
+    color: var(--q-accent);
+  }
+
+  /* Scrollbar */
+  #chat::-webkit-scrollbar { width: 6px; }
+  #chat::-webkit-scrollbar-track { background: transparent; }
+  #chat::-webkit-scrollbar-thumb { background: var(--q-border2); border-radius: 3px; }
+
+  /* Token badge */
+  .token-badge {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--q-muted);
+    padding: 2px 8px;
+    background: var(--q-surface2);
+    border-radius: 4px;
+    border: 1px solid var(--q-border);
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- HEADER -->
+  <div id="header">
+    <div class="logo-area">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+      </div>
+      <div class="logo-text">
+        <span>COMBOT</span>
+        <span>Carrier Operations</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="auth-form" id="auth-form">
+        <input type="text" id="header-login" placeholder="Login" autocomplete="username">
+        <input type="password" id="header-password" placeholder="Password" autocomplete="current-password">
+        <button class="auth-btn" id="header-auth-btn" onclick="handleAuth()">LOGIN</button>
+      </div>
+      <div class="status-dot" id="status-dot" title="Disconnected"></div>
+      <span class="token-badge" id="token-badge" style="display:none"></span>
+    </div>
+  </div>
+
+  <!-- CHAT -->
+  <div id="chat">
+    <div class="welcome" id="welcome-msg">
+      <h2>Hello, Good to see you!</h2>
+      <p>What can I do for you today?</p>
+      <div class="suggestions">
+        <button class="suggestion-btn" onclick="sendSuggestion('What is the status of locker GBR00043?')">Locker status</button>
+        <button class="suggestion-btn" onclick="sendSuggestion('What is the current status of parcel H05QTA0216703036?')">Parcel status</button>
+        <button class="suggestion-btn" onclick="sendSuggestion('Find available lockers near London')">Find nearby lockers</button>
+        <button class="suggestion-btn" onclick="sendSuggestion('Show me the pickup code for a parcel')">Pickup code</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- INPUT -->
+  <div id="input-area">
+    <textarea id="msg-input" placeholder="Type your message..." rows="1" disabled
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
+    <button id="send-btn" onclick="sendMessage()" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="22" y1="2" x2="11" y2="13"/>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Lock overlay when not authenticated -->
+  <div class="lock-overlay" id="lock-overlay" style="display:none">
+    <div class="lock-msg">
+      <strong>Authentication required</strong><br>
+      Please log in with your PMD credentials above.
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  let sessionId = null;
+  let isAuthenticated = false;
+  let isStreaming = false;
+  let sessionTokens = { input: 0, output: 0 };
+
+  const chat = document.getElementById('chat');
+  const msgInput = document.getElementById('msg-input');
+  const sendBtn = document.getElementById('send-btn');
+  const statusDot = document.getElementById('status-dot');
+  const lockOverlay = document.getElementById('lock-overlay');
+  const welcomeMsg = document.getElementById('welcome-msg');
+  const tokenBadge = document.getElementById('token-badge');
+  const loginInput = document.getElementById('header-login');
+  const passwordInput = document.getElementById('header-password');
+  const authBtn = document.getElementById('header-auth-btn');
+
+  // --- CSRF ---
+  function getCsrfToken() {
+    const match = document.cookie.match(/(?:^|;\s*)com_chatbot_csrf=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  function csrfHeaders() {
+    return { 'X-CSRF-Token': getCsrfToken() };
+  }
+
+  // --- Auth ---
+  async function checkAuth() {
+    try {
+      const resp = await fetch('/api/ui/auth-defaults');
+      const data = await resp.json();
+      if (data.is_authenticated) {
+        setAuthenticated(true);
+      } else {
+        setAuthenticated(false);
+      }
+    } catch (e) {
+      setAuthenticated(false);
+    }
+  }
+
+  function setAuthenticated(auth) {
+    isAuthenticated = auth;
+    statusDot.classList.toggle('connected', auth);
+    statusDot.title = auth ? 'Connected' : 'Disconnected';
+    lockOverlay.style.display = auth ? 'none' : 'flex';
+    msgInput.disabled = !auth;
+    sendBtn.disabled = !auth;
+
+    if (auth) {
+      authBtn.textContent = 'LOGOUT';
+      authBtn.classList.add('logout');
+      loginInput.disabled = true;
+      passwordInput.disabled = true;
+    } else {
+      authBtn.textContent = 'LOGIN';
+      authBtn.classList.remove('logout');
+      loginInput.disabled = false;
+      passwordInput.disabled = false;
+    }
+  }
+
+  window.handleAuth = async function() {
+    if (isAuthenticated) {
+      // Logout
+      try {
+        await fetch('/api/ui/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
+        });
+      } catch (e) { /* ignore */ }
+      setAuthenticated(false);
+      sessionId = null;
+      sessionTokens = { input: 0, output: 0 };
+      tokenBadge.style.display = 'none';
+      chat.innerHTML = '';
+      if (welcomeMsg.parentNode !== chat) {
+        chat.appendChild(welcomeMsg);
+      }
+      welcomeMsg.style.display = '';
+      return;
+    }
+
+    const login = loginInput.value.trim();
+    const password = passwordInput.value;
+    if (!login || !password) return;
+
+    authBtn.disabled = true;
+    try {
+      const resp = await fetch('/api/ui/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
+        body: JSON.stringify({ login, password }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert(err.detail || 'Login failed');
+        return;
+      }
+      setAuthenticated(true);
+    } catch (e) {
+      alert('Network error during login');
+    } finally {
+      authBtn.disabled = false;
+    }
+  };
+
+  // --- Suggestions ---
+  window.sendSuggestion = function(text) {
+    if (!isAuthenticated || isStreaming) return;
+    msgInput.value = text;
+    sendMessage();
+  };
+
+  // --- Chat ---
+  function addMessage(role, text) {
+    if (welcomeMsg.style.display !== 'none') {
+      welcomeMsg.style.display = 'none';
+    }
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    div.textContent = text;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    return div;
+  }
+
+  function addToolActivity(label) {
+    const div = document.createElement('div');
+    div.className = 'tool-activity';
+    div.textContent = label;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    return div;
+  }
+
+  function showTyping() {
+    const div = document.createElement('div');
+    div.className = 'typing-indicator';
+    div.id = 'typing';
+    div.innerHTML = '<span>.</span><span>.</span><span>.</span>';
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function removeTyping() {
+    const el = document.getElementById('typing');
+    if (el) el.remove();
+  }
+
+  function updateTokenBadge(usage) {
+    if (!usage) return;
+    const turn = usage.turn || {};
+    const session = usage.session || {};
+    sessionTokens.input = session.input_tokens || sessionTokens.input;
+    sessionTokens.output = session.output_tokens || sessionTokens.output;
+    const total = sessionTokens.input + sessionTokens.output;
+    tokenBadge.textContent = `${total.toLocaleString()} tok`;
+    tokenBadge.style.display = '';
+  }
+
+  window.sendMessage = async function() {
+    const text = msgInput.value.trim();
+    if (!text || !isAuthenticated || isStreaming) return;
+
+    msgInput.value = '';
+    addMessage('user', text);
+    isStreaming = true;
+    msgInput.disabled = true;
+    sendBtn.disabled = true;
+    showTyping();
+
+    try {
+      const resp = await fetch('/api/chat/message/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
+        body: JSON.stringify({ message: text, session_id: sessionId }),
+      });
+
+      if (!resp.ok) {
+        removeTyping();
+        if (resp.status === 401) {
+          setAuthenticated(false);
+          addMessage('error', 'Session expired. Please log in again.');
+        } else {
+          addMessage('error', `Error: ${resp.status}`);
+        }
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let assistantDiv = null;
+      let assistantText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const event = JSON.parse(line.substring(6));
+              const type = event.type;
+
+              if (type === 'status') {
+                if (event.session_id) sessionId = event.session_id;
+              } else if (type === 'tool_activity') {
+                addToolActivity(event.label || event.tool_name);
+              } else if (type === 'text_delta') {
+                removeTyping();
+                if (!assistantDiv) {
+                  assistantDiv = addMessage('assistant', '');
+                }
+                assistantText += event.delta || '';
+                assistantDiv.textContent = assistantText;
+                chat.scrollTop = chat.scrollHeight;
+              } else if (type === 'done') {
+                removeTyping();
+                if (event.session_id) sessionId = event.session_id;
+                if (!assistantDiv && event.assistant_text) {
+                  addMessage('assistant', event.assistant_text);
+                } else if (assistantDiv && !assistantText && event.assistant_text) {
+                  assistantDiv.textContent = event.assistant_text;
+                }
+                updateTokenBadge(event.token_usage);
+              } else if (type === 'error') {
+                removeTyping();
+                addMessage('error', event.error || 'Unknown error');
+              }
+            } catch (e) { /* skip malformed SSE */ }
+          }
+        }
+      }
+
+    } catch (e) {
+      removeTyping();
+      addMessage('error', 'Network error. Please try again.');
+    } finally {
+      isStreaming = false;
+      msgInput.disabled = false;
+      sendBtn.disabled = false;
+      msgInput.focus();
+    }
+  };
+
+  // Auto-resize textarea
+  msgInput.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+  });
+
+  // Enter on password field triggers login
+  passwordInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAuth();
+    }
+  });
+
+  // Boot
+  checkAuth();
+})();
+</script>
+
+</body>
+</html>
