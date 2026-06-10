@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -174,6 +175,11 @@ app.add_middleware(SessionMiddleware, **_SESSION_MIDDLEWARE_OPTIONS)
 app.add_middleware(CSRFMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
+_UI_DIR = os.path.join(os.path.dirname(__file__), "ui")
+_UI_ASSETS_DIR = os.path.join(_UI_DIR, "assets")
+if os.path.isdir(_UI_ASSETS_DIR):
+    app.mount("/ui/assets", StaticFiles(directory=_UI_ASSETS_DIR), name="ui-assets")
+
 
 class ChatMessageRequest(BaseModel):
     message: str = Field(min_length=1, max_length=_CHAT_MESSAGE_MAX_LENGTH)
@@ -224,7 +230,7 @@ def _require_pmd_auth():
 
 @app.get("/", response_class=FileResponse)
 def index():
-    ui_path = os.path.join(os.path.dirname(__file__), "ui", "carrier_operation_manager_assistant.html")
+    ui_path = os.path.join(_UI_DIR, "carrier_operation_manager_assistant.html")
     return FileResponse(ui_path)
 
 

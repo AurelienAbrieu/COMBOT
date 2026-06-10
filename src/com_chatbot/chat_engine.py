@@ -106,6 +106,8 @@ def _extract_stream_tool_calls(event: object) -> list[dict]:
 
 _TOOL_LABELS: dict[str, str] = {
     "get_locker_status": "Checking locker status...",
+    "get_locker_zone_status": "Checking locker zone status...",
+    "get_locker_device_snapshot": "Collecting locker technical snapshot...",
     "check_parcel_status": "Looking up parcel...",
     "view_pickup_code": "Retrieving pickup code...",
     "resend_pickup_code": "Resending pickup code...",

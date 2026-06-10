@@ -12,7 +12,7 @@ from .request_context import get_web_session_key
 
 PMD_LOGGER = get_component_logger("pmd", "pmd_api.log")
 PMD_LOG_VERBOSE_PAYLOADS_ENV = "PMD_LOG_VERBOSE_PAYLOADS"
-PMD_LOG_MAX_BODY_CHARS = max(500, int(os.environ.get("PMD_LOG_MAX_BODY_CHARS", "4000")))
+PMD_LOG_MAX_BODY_CHARS_DEFAULT = 4000
 
 
 def _env_bool(name, default=False):
@@ -153,10 +153,18 @@ class PMDClient:
     def _truncate_for_log(self, text):
         if not isinstance(text, str):
             return text
-        if len(text) <= PMD_LOG_MAX_BODY_CHARS:
+        max_body_chars = PMD_LOG_MAX_BODY_CHARS_DEFAULT
+        configured_max = os.environ.get("PMD_LOG_MAX_BODY_CHARS", str(PMD_LOG_MAX_BODY_CHARS_DEFAULT))
+        try:
+            max_body_chars = max(500, int(configured_max))
+        except (TypeError, ValueError):
+            max_body_chars = max(500, PMD_LOG_MAX_BODY_CHARS_DEFAULT)
+        # Keep one-line logs readable even when payloads contain line breaks.
+        text = text.replace("\r", "\\r").replace("\n", "\\n")
+        if len(text) <= max_body_chars:
             return text
-        truncated_chars = len(text) - PMD_LOG_MAX_BODY_CHARS
-        return f"{text[:PMD_LOG_MAX_BODY_CHARS]}... [truncated {truncated_chars} chars]"
+        truncated_chars = len(text) - max_body_chars
+        return f"{text[:max_body_chars]}... [truncated {truncated_chars} chars]"
 
     def _verbose_payload_logging_enabled(self):
         return _env_bool(PMD_LOG_VERBOSE_PAYLOADS_ENV, default=False)
@@ -182,7 +190,7 @@ class PMDClient:
     def _format_response_metadata(self, response_text):
         if not response_text:
             return " payload=empty chars=0"
-        metadata = [f"payload=omitted chars={len(response_text)}"]
+        metadata = [f"payload={self._sanitize_response_text(response_text)}", f"chars={len(response_text)}"]
         try:
             parsed = json.loads(response_text)
         except ValueError:

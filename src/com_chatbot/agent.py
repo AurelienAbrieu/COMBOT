@@ -86,6 +86,8 @@ def get_loaded_model_metadata() -> dict:
 
 from .tools_status import (
     get_locker_status,
+    get_locker_zone_status,
+    get_locker_device_snapshot,
     check_parcel_status,
 )
 from .tools_pickup import (
@@ -123,6 +125,8 @@ Confirmation flow for modifications:
 
 ## Tool selection hints:
 - "status of locker" / "locker status" / "device status" → get_locker_status (pass the device ID)
+- "zone status" / "status of zone" / "state of box" → get_locker_zone_status (pass device ID and exact zone path)
+- "device snapshot" / "raw device payload" / "technical details of locker" → get_locker_device_snapshot (pass device ID)
 - "parcel status" / "where is parcel" / "track parcel" → check_parcel_status (pass the tracking number)
 - "pickup code" / "view code" / "PIN code" / "access code for parcel" → view_pickup_code
 - "resend code" / "resend notification" / "send pickup code again" → resend_pickup_code
@@ -141,6 +145,7 @@ Confirmation flow for modifications:
 ## Locker status follow-up:
 - When reporting locker status with blocked boxes or expired parcels, proactively ask if the user wants to extend the period for expired parcels.
 - If the user says "yes", ask until which date.
+- When proposing a quick locker status check example, use locker ID DEMO00001 by default.
 
 # Output Rules
 
@@ -148,7 +153,7 @@ Confirmation flow for modifications:
 - Report tool results directly - don't elaborate unnecessarily.
 - NEVER invent, infer, or summarize data not present in tool output.
 - If API error: explain simply, suggest alternatives, never auto-retry.
-- After answering, suggest a relevant follow-up action (e.g. "Do you need to check the status of another parcel?", "Do you need to know the occupation rate?").
+- After answering, suggest a relevant follow-up action (e.g. "Do you need to check the status of locker DEMO00001?", "Do you need to check the status of another parcel?", "Do you need to know the occupation rate?").
 - When listing lockers or parcels, present the data clearly.
 - Do not use markdown tables. Use simple text formatting.
 """
@@ -163,6 +168,8 @@ def create_agent() -> Agent:
         system_prompt=SYSTEM_PROMPT,
         tools=[
             get_locker_status,
+            get_locker_zone_status,
+            get_locker_device_snapshot,
             check_parcel_status,
             view_pickup_code,
             resend_pickup_code,

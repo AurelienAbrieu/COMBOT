@@ -7,6 +7,122 @@ from strands import tool
 from .pmd_client import PMDClientError, client
 
 
+def _normalize_devices_payload(payload: object) -> list[dict]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        for key in ("items", "devices", "data"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _fetch_all_devices(page_size: int = 200) -> list[dict]:
+    devices: list[dict] = []
+    subset_from = 0
+
+    while True:
+        subset_to = subset_from + page_size
+        payload = client.get(
+            "/api/assets/devices",
+            params={"subsetFrom": subset_from, "subsetTo": subset_to},
+        )
+        page = _normalize_devices_payload(payload)
+        if not page:
+            break
+        devices.extend(page)
+        if len(page) < page_size:
+            break
+        subset_from += page_size
+
+    return devices
+
+
+def _root_zone(device: dict) -> dict:
+    description = device.get("deviceDescription")
+    if not isinstance(description, dict):
+        return {}
+    zone = description.get("zone")
+    return zone if isinstance(zone, dict) else {}
+
+
+def _extract_coordinates(device: dict) -> tuple[float, float] | None:
+    zone = _root_zone(device)
+    attrs = zone.get("attributes")
+    if not isinstance(attrs, dict):
+        return None
+    location = attrs.get("location")
+    if not isinstance(location, dict):
+        return None
+    coordinates = location.get("coordinates")
+    if not isinstance(coordinates, dict):
+        return None
+
+    lat = coordinates.get("lat")
+    lon = coordinates.get("lon")
+    if lat is None or lon is None:
+        return None
+
+    try:
+        return float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_location(device: dict) -> str:
+    zone = _root_zone(device)
+    attrs = zone.get("attributes")
+    if not isinstance(attrs, dict):
+        return "N/A"
+    location = attrs.get("location")
+    if not isinstance(location, dict):
+        return "N/A"
+
+    parts: list[str] = []
+    address = location.get("address")
+    if isinstance(address, list):
+        parts.extend(str(x).strip() for x in address if str(x).strip())
+    elif isinstance(address, str) and address.strip():
+        parts.append(address.strip())
+
+    for key in ("city", "postCode", "countryIsoCode", "country"):
+        value = location.get(key)
+        if value and str(value).strip():
+            parts.append(str(value).strip())
+
+    return ", ".join(parts) if parts else "N/A"
+
+
+def _extract_root_state_value(device: dict, state_name: str) -> str:
+    zone = _root_zone(device)
+    state = zone.get("state")
+    if not isinstance(state, dict):
+        return "N/A"
+    node = state.get(state_name)
+    if not isinstance(node, dict):
+        return "N/A"
+    value = node.get("value")
+    return str(value) if value is not None else "N/A"
+
+
+def _derive_operational_status(device: dict) -> str:
+    activation = _extract_root_state_value(device, "activation").upper()
+    connection = _extract_root_state_value(device, "connection").upper()
+
+    if activation in {"ACTIVE", "PENDING"} and connection == "CONNECTED":
+        return "OPERATIONAL"
+    if activation in {"ACTIVE", "PENDING"} and connection == "DISCONNECTED":
+        return "ACTIVE_BUT_OFFLINE"
+    if activation == "MAINTENANCE":
+        return "MAINTENANCE"
+    if activation == "BLOCKED":
+        return "BLOCKED"
+    if activation in {"INACTIVE", "ARCHIVED", "PLAN"}:
+        return activation
+    return "UNKNOWN"
+
+
 @tool
 def find_nearby_lockers(latitude: float, longitude: float, radius_km: float = 5.0) -> str:
     """Find available lockers near given GPS coordinates.
@@ -28,53 +144,35 @@ def find_nearby_lockers(latitude: float, longitude: float, radius_km: float = 5.
         return "Error: longitude must be between -180 and 180."
 
     try:
-        devices = client.get("/api/assets/devices")
+        devices = _fetch_all_devices(page_size=200)
     except PMDClientError as exc:
         return f"Error: unable to retrieve locker list (HTTP {exc.status_code})."
 
-    if isinstance(devices, dict):
-        devices = devices.get("items") or devices.get("devices") or devices.get("data") or []
-    if not isinstance(devices, list):
-        devices = []
-
     nearby = []
     for device in devices:
-        if not isinstance(device, dict):
+        coords = _extract_coordinates(device)
+        if coords is None:
             continue
 
-        address = device.get("address") or {}
-        if not isinstance(address, dict):
-            continue
-
-        dev_lat = address.get("latitude") or address.get("lat")
-        dev_lon = address.get("longitude") or address.get("lon") or address.get("lng")
-
-        if dev_lat is None or dev_lon is None:
-            continue
-
-        try:
-            dev_lat = float(dev_lat)
-            dev_lon = float(dev_lon)
-        except (ValueError, TypeError):
-            continue
+        dev_lat, dev_lon = coords
 
         distance = _haversine_km(latitude, longitude, dev_lat, dev_lon)
         if distance <= radius_km:
-            code = device.get("code") or device.get("deviceCode") or "N/A"
+            code = device.get("id") or "N/A"
             name = device.get("name") or code
-            status = device.get("status") or "unknown"
-
-            address_parts = []
-            for field in ("streetLine1", "streetLine2", "city", "zipCode"):
-                val = address.get(field)
-                if val and str(val).strip():
-                    address_parts.append(str(val).strip())
-            address_str = ", ".join(address_parts) if address_parts else "N/A"
+            mode = str((device.get("deviceDescription") or {}).get("mode") or "N/A")
+            activation = _extract_root_state_value(device, "activation")
+            connection = _extract_root_state_value(device, "connection")
+            status = _derive_operational_status(device)
+            address_str = _extract_location(device)
 
             nearby.append({
                 "code": code,
                 "name": name,
                 "status": status,
+                "activation": activation,
+                "connection": connection,
+                "mode": mode,
                 "address": address_str,
                 "distance_km": round(distance, 2),
             })
@@ -87,7 +185,8 @@ def find_nearby_lockers(latitude: float, longitude: float, radius_km: float = 5.
     lines = [f"Found {len(nearby)} locker(s) within {radius_km} km:"]
     for loc in nearby:
         lines.append(
-            f"- {loc['name']} ({loc['code']}) - {loc['status']} - "
+            f"- {loc['name']} ({loc['code']}) - {loc['status']} "
+            f"[mode={loc['mode']}, activation={loc['activation']}, connection={loc['connection']}] - "
             f"{loc['address']} - {loc['distance_km']} km away"
         )
 
