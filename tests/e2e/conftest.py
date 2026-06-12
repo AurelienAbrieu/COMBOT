@@ -9,13 +9,18 @@ Usage:
 import os
 import socket
 import sys
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
+from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 from playwright.sync_api import sync_playwright
+
+
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 def pytest_addoption(parser):
@@ -52,7 +57,8 @@ def browser(request):
 def page(browser, base_url):
     ctx = browser.new_context()
     p = ctx.new_page()
-    p.goto(base_url)
+    p.goto(base_url, wait_until="domcontentloaded", timeout=30000)
+    p.locator("#header-auth-btn").wait_for(state="visible", timeout=10000)
     yield p
     p.close()
     ctx.close()
@@ -67,15 +73,26 @@ def authenticated_page(page):
     login_field = page.locator("#header-login")
     password_field = page.locator("#header-password")
     auth_btn = page.locator("#header-auth-btn")
+    msg_input = page.locator("#msg-input")
 
-    if login_field.is_disabled():
+    page.wait_for_function(
+        "() => !!document.getElementById('header-auth-btn') && !!document.getElementById('msg-input')",
+        timeout=10000,
+    )
+
+    if not login_field.is_disabled():
+        if not login or not password:
+            pytest.fail("PMD_LOGIN and PMD_PASSWORD must be available for E2E authentication.")
+        login_field.fill(login)
+        password_field.fill(password)
         auth_btn.click()
-        page.wait_for_function("() => document.getElementById('lock-overlay').style.display === 'none'", timeout=10000)
-    else:
-        if login and password:
-            login_field.fill(login)
-            password_field.fill(password)
-        auth_btn.click()
-        page.wait_for_function("() => document.getElementById('lock-overlay').style.display === 'none'", timeout=10000)
+
+    page.wait_for_function(
+        "() => { const overlay = document.getElementById('lock-overlay'); const input = document.getElementById('msg-input'); return !!overlay && !!input && overlay.style.display === 'none' && !input.disabled; }",
+        timeout=15000,
+    )
+    expect_title = page.locator("#status-dot")
+    expect_title.wait_for(state="attached", timeout=5000)
+    assert msg_input.is_enabled(), "Message input should be enabled after authentication"
 
     return page

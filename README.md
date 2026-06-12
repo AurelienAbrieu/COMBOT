@@ -53,9 +53,9 @@ COMBOT/
 
 ```bash
 # Create virtual environment
-python -m venv venv
-venv\Scripts\activate        # Windows
-source venv/bin/activate     # Linux/Mac
+python -m venv .venv
+.venv\Scripts\activate      # Windows
+source .venv/bin/activate    # Linux/Mac
 
 # Install dependencies
 pip install -r requirements.txt
@@ -68,8 +68,10 @@ cp .env.example .env
 ### Run (Web)
 
 ```bash
-python -m uvicorn web_app:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn web_app:app --host 127.0.0.1 --port 8000
 ```
+
+On this Windows setup, `--reload` can leave Uvicorn listening on `:8000` without actually answering HTTP requests. Use the non-reload command above for local UI work and E2E runs.
 
 Open http://127.0.0.1:8000 in your browser.
 
@@ -88,6 +90,8 @@ pytest tests/e2e/ --headed -v
 # Unit tests
 pytest tests/unit/ -v
 ```
+
+If you use the VS Code tasks in this repo, they assume the project environment is `.venv`.
 
 ## UI
 

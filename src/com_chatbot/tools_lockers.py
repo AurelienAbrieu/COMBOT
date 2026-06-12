@@ -1,206 +1,187 @@
-"""Tools for locating available lockers by GPS coordinates (Carrier Operation Manager)."""
-
-import math
+"""Tools for locating accessible lockers/devices (Carrier Operation Manager)."""
 
 from strands import tool
 
 from .pmd_client import PMDClientError, client
 
 
-def _normalize_devices_payload(payload: object) -> list[dict]:
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-    if isinstance(payload, dict):
-        for key in ("items", "devices", "data"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
-    return []
+def _normalize_tracking_device_payload(payload: object) -> tuple[list[dict], int | None]:
+    if not isinstance(payload, dict):
+        return [], None
+
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return [], payload.get("total") if isinstance(payload.get("total"), int) else None
+
+    items = [item for item in data if isinstance(item, dict)]
+    total = payload.get("total")
+    return items, total if isinstance(total, int) else None
 
 
-def _fetch_all_devices(page_size: int = 200) -> list[dict]:
-    devices: list[dict] = []
-    subset_from = 0
-
-    while True:
-        subset_to = subset_from + page_size
-        payload = client.get(
-            "/api/assets/devices",
-            params={"subsetFrom": subset_from, "subsetTo": subset_to},
-        )
-        page = _normalize_devices_payload(payload)
-        if not page:
-            break
-        devices.extend(page)
-        if len(page) < page_size:
-            break
-        subset_from += page_size
-
-    return devices
+def _normalize_statuses(statuses: str) -> list[str]:
+    values = []
+    for raw_value in (statuses or "").split(","):
+        normalized = raw_value.strip().upper()
+        if normalized:
+            values.append(normalized)
+    return values
 
 
-def _root_zone(device: dict) -> dict:
-    description = device.get("deviceDescription")
-    if not isinstance(description, dict):
+def _search_tracking_devices(
+    latitude: float | None,
+    longitude: float | None,
+    radius_km: float,
+    statuses: list[str],
+    limit: int,
+) -> tuple[list[dict], int | None]:
+    params: dict[str, object] = {"from": 0, "size": limit}
+
+    if statuses:
+        params["fterms_attributes.status"] = ",".join(statuses)
+
+    if latitude is not None and longitude is not None:
+        params["fgeo_attributes.site.coordinates"] = f"{latitude},{longitude}_{radius_km}_km"
+
+    payload = client.get("/api/tracking-device/devices", params=params)
+    return _normalize_tracking_device_payload(payload)
+
+
+def _device_attributes(hit: dict) -> dict:
+    source = hit.get("_source")
+    if not isinstance(source, dict):
         return {}
-    zone = description.get("zone")
-    return zone if isinstance(zone, dict) else {}
+    attributes = source.get("attributes")
+    return attributes if isinstance(attributes, dict) else {}
 
 
-def _extract_coordinates(device: dict) -> tuple[float, float] | None:
-    zone = _root_zone(device)
-    attrs = zone.get("attributes")
-    if not isinstance(attrs, dict):
-        return None
-    location = attrs.get("location")
-    if not isinstance(location, dict):
-        return None
-    coordinates = location.get("coordinates")
-    if not isinstance(coordinates, dict):
+def _site_details(attributes: dict) -> dict:
+    site = attributes.get("site")
+    return site if isinstance(site, dict) else {}
+
+
+def _format_site_location(site: dict) -> str:
+    parts: list[str] = []
+    for key in ("name", "address", "city", "postCode", "country"):
+        value = site.get(key)
+        if isinstance(value, list):
+            parts.extend(str(item).strip() for item in value if str(item).strip())
+            continue
+        if value and str(value).strip():
+            parts.append(str(value).strip())
+    return ", ".join(parts) if parts else "N/A"
+
+
+def _format_distance(hit: dict) -> str | None:
+    sort_values = hit.get("sort")
+    if not isinstance(sort_values, list) or not sort_values:
         return None
 
-    lat = coordinates.get("lat")
-    lon = coordinates.get("lon")
-    if lat is None or lon is None:
-        return None
-
+    distance = sort_values[0]
     try:
-        return float(lat), float(lon)
+        return f"{float(distance):.2f} km"
     except (TypeError, ValueError):
         return None
 
 
-def _extract_location(device: dict) -> str:
-    zone = _root_zone(device)
-    attrs = zone.get("attributes")
-    if not isinstance(attrs, dict):
-        return "N/A"
-    location = attrs.get("location")
-    if not isinstance(location, dict):
-        return "N/A"
+def _format_device_line(hit: dict, include_distance: bool) -> str:
+    attributes = _device_attributes(hit)
+    site = _site_details(attributes)
+    device_id = str(attributes.get("id") or "N/A")
+    status = str(attributes.get("status") or "N/A")
+    generation = str(attributes.get("generation") or "N/A")
+    install_type = str(attributes.get("installType") or "N/A")
+    usage = str(attributes.get("usage") or "N/A")
+    location = _format_site_location(site)
 
-    parts: list[str] = []
-    address = location.get("address")
-    if isinstance(address, list):
-        parts.extend(str(x).strip() for x in address if str(x).strip())
-    elif isinstance(address, str) and address.strip():
-        parts.append(address.strip())
+    details = [
+        f"status={status}",
+        f"generation={generation}",
+        f"installType={install_type}",
+        f"usage={usage}",
+        f"site={location}",
+    ]
 
-    for key in ("city", "postCode", "countryIsoCode", "country"):
-        value = location.get(key)
-        if value and str(value).strip():
-            parts.append(str(value).strip())
+    if include_distance:
+        distance = _format_distance(hit)
+        if distance is not None:
+            details.append(f"distance={distance}")
 
-    return ", ".join(parts) if parts else "N/A"
-
-
-def _extract_root_state_value(device: dict, state_name: str) -> str:
-    zone = _root_zone(device)
-    state = zone.get("state")
-    if not isinstance(state, dict):
-        return "N/A"
-    node = state.get(state_name)
-    if not isinstance(node, dict):
-        return "N/A"
-    value = node.get("value")
-    return str(value) if value is not None else "N/A"
-
-
-def _derive_operational_status(device: dict) -> str:
-    activation = _extract_root_state_value(device, "activation").upper()
-    connection = _extract_root_state_value(device, "connection").upper()
-
-    if activation in {"ACTIVE", "PENDING"} and connection == "CONNECTED":
-        return "OPERATIONAL"
-    if activation in {"ACTIVE", "PENDING"} and connection == "DISCONNECTED":
-        return "ACTIVE_BUT_OFFLINE"
-    if activation == "MAINTENANCE":
-        return "MAINTENANCE"
-    if activation == "BLOCKED":
-        return "BLOCKED"
-    if activation in {"INACTIVE", "ARCHIVED", "PLAN"}:
-        return activation
-    return "UNKNOWN"
+    return f"- {device_id} [{', '.join(details)}]"
 
 
 @tool
-def find_nearby_lockers(latitude: float, longitude: float, radius_km: float = 5.0) -> str:
-    """Find available lockers near given GPS coordinates.
+def find_nearby_lockers(
+    latitude: float | None = None,
+    longitude: float | None = None,
+    radius_km: float = 5.0,
+    statuses: str = "",
+    limit: int = 100,
+) -> str:
+    """List accessible lockers/devices, optionally filtered by area and status.
 
-    Searches for lockers within a specified radius of the provided coordinates.
-    Useful for carriers looking for drop-off points in an area (e.g. London area).
+    Uses the tracking-device/device-view API, which already enforces the current user's
+    access scope. If latitude/longitude are provided, the search is restricted to SITE-based
+    devices around those coordinates. If statuses are provided, filtering is delegated to the API.
 
     Args:
-        latitude: GPS latitude (e.g. 51.5074 for London).
-        longitude: GPS longitude (e.g. -0.1278 for London).
-        radius_km: Search radius in kilometers (default 5 km).
+        latitude: Optional GPS latitude.
+        longitude: Optional GPS longitude.
+        radius_km: Search radius in kilometers when coordinates are provided.
+        statuses: Optional comma-separated statuses such as "ACTIVE,MAINTENANCE".
+        limit: Maximum number of devices to return (default 100).
 
     Returns:
-        A list of nearby lockers with their address, distance, and availability.
+        A text list of accessible devices, optionally constrained by status and/or location.
     """
-    if not (-90 <= latitude <= 90):
+    if (latitude is None) != (longitude is None):
+        return "Error: latitude and longitude must be provided together."
+    if latitude is not None and not (-90 <= latitude <= 90):
         return "Error: latitude must be between -90 and 90."
-    if not (-180 <= longitude <= 180):
+    if longitude is not None and not (-180 <= longitude <= 180):
         return "Error: longitude must be between -180 and 180."
+    if radius_km <= 0:
+        return "Error: radius_km must be greater than 0."
+    if limit <= 0:
+        return "Error: limit must be greater than 0."
+
+    normalized_statuses = _normalize_statuses(statuses)
+    if statuses and not normalized_statuses:
+        return "Error: statuses must contain at least one non-empty value."
 
     try:
-        devices = _fetch_all_devices(page_size=200)
-    except PMDClientError as exc:
-        return f"Error: unable to retrieve locker list (HTTP {exc.status_code})."
-
-    nearby = []
-    for device in devices:
-        coords = _extract_coordinates(device)
-        if coords is None:
-            continue
-
-        dev_lat, dev_lon = coords
-
-        distance = _haversine_km(latitude, longitude, dev_lat, dev_lon)
-        if distance <= radius_km:
-            code = device.get("id") or "N/A"
-            name = device.get("name") or code
-            mode = str((device.get("deviceDescription") or {}).get("mode") or "N/A")
-            activation = _extract_root_state_value(device, "activation")
-            connection = _extract_root_state_value(device, "connection")
-            status = _derive_operational_status(device)
-            address_str = _extract_location(device)
-
-            nearby.append({
-                "code": code,
-                "name": name,
-                "status": status,
-                "activation": activation,
-                "connection": connection,
-                "mode": mode,
-                "address": address_str,
-                "distance_km": round(distance, 2),
-            })
-
-    nearby.sort(key=lambda x: x["distance_km"])
-
-    if not nearby:
-        return f"No lockers found within {radius_km} km of ({latitude}, {longitude})."
-
-    lines = [f"Found {len(nearby)} locker(s) within {radius_km} km:"]
-    for loc in nearby:
-        lines.append(
-            f"- {loc['name']} ({loc['code']}) - {loc['status']} "
-            f"[mode={loc['mode']}, activation={loc['activation']}, connection={loc['connection']}] - "
-            f"{loc['address']} - {loc['distance_km']} km away"
+        devices, total = _search_tracking_devices(
+            latitude=latitude,
+            longitude=longitude,
+            radius_km=radius_km,
+            statuses=normalized_statuses,
+            limit=limit,
         )
+    except PMDClientError as exc:
+        return f"Error: unable to retrieve accessible devices (HTTP {exc.status_code})."
+
+    if not devices:
+        if latitude is not None and longitude is not None:
+            return f"No accessible devices found within {radius_km} km of ({latitude}, {longitude})."
+        if normalized_statuses:
+            return f"No accessible devices found for statuses: {', '.join(normalized_statuses)}."
+        return "No accessible devices found."
+
+    filters: list[str] = []
+    if normalized_statuses:
+        filters.append(f"statuses={','.join(normalized_statuses)}")
+    if latitude is not None and longitude is not None:
+        filters.append(f"within={radius_km}km around ({latitude}, {longitude})")
+
+    header = f"Found {len(devices)} accessible device(s)"
+    if total is not None:
+        header += f" (total={total})"
+    if filters:
+        header += f" with {'; '.join(filters)}"
+    header += ":"
+
+    lines = [header]
+    include_distance = latitude is not None and longitude is not None
+    for device in devices:
+        lines.append(_format_device_line(device, include_distance=include_distance))
 
     return "\n".join(lines)
-
-
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate great-circle distance between two GPS points in km."""
-    R = 6371.0
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
-    )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c

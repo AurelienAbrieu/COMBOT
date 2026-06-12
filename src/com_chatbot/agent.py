@@ -130,7 +130,7 @@ Confirmation flow for modifications:
 - "parcel status" / "where is parcel" / "track parcel" → check_parcel_status (pass the tracking number)
 - "pickup code" / "view code" / "PIN code" / "access code for parcel" → view_pickup_code
 - "resend code" / "resend notification" / "send pickup code again" → resend_pickup_code
-- "nearby lockers" / "lockers in the area" / "find locker" / "available lockers" → find_nearby_lockers (pass GPS coordinates)
+- "nearby lockers" / "lockers in the area" / "find locker" / "available lockers" / "accessible devices" / "devices I can access" / "active or maintenance devices" → find_nearby_lockers (optionally pass GPS coordinates, radius, statuses, or no coordinates for a full accessible-device list)
 - "add courier" / "register carrier" / "new delivery agent" → add_courier
 - "remove courier" / "delete carrier" / "unregister delivery agent" → remove_courier
 - "generate report" / "send report" / "report by email" / "occupation rate" / "activity report" → generate_report

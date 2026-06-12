@@ -60,3 +60,29 @@ def test_nearby_lockers_tool_response(authenticated_page):
     assert "locker" in lowered
     assert "km" in lowered or "within" in lowered
     assert_timing(response, wall_max_ms=45_000)
+
+
+@pytest.mark.e2e
+def test_accessible_devices_tool_response(authenticated_page):
+    response = send_and_wait(
+        authenticated_page,
+        "List all accessible devices I can access.",
+    )
+
+    assert response.assistant_text.strip(), "Assistant response is empty"
+    lowered = response.assistant_text.lower()
+    assert "accessible" in lowered or "device" in lowered or "locker" in lowered
+    assert_timing(response, wall_max_ms=45_000)
+
+
+@pytest.mark.e2e
+def test_accessible_devices_by_status_tool_response(authenticated_page):
+    response = send_and_wait(
+        authenticated_page,
+        "List all accessible devices in status ACTIVE or MAINTENANCE.",
+    )
+
+    assert response.assistant_text.strip(), "Assistant response is empty"
+    lowered = response.assistant_text.lower()
+    assert "active" in lowered or "maintenance" in lowered or "device" in lowered
+    assert_timing(response, wall_max_ms=45_000)
