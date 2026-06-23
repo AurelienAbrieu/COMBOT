@@ -132,6 +132,7 @@ These are critical for robust client parsing:
 
 ### Principles
 - Use `/api/assets/devices/{id}` as the source of truth for locker/device status.
+- Use `/api/parcel_events_in_devices/{deviceCode}/boxView` as the source of truth for parcel occupancy in boxes (see `docs/parcel-events-in-devices-boxview-kb.md`).
 - Do not perform implicit fallback to unrelated endpoints when this endpoint fails or is empty.
 - Derive status from schema-backed fields only.
 
@@ -181,13 +182,13 @@ These are critical for robust client parsing:
 4. `generate_report`
 - Pertinent: operational KPI/reporting workflow, complementary to real-time status.
 
-## Status Derivation Heuristics in COMBOT
-Current implementation uses schema-safe heuristics:
+## Status Derivation Heuristics in COMBOT (device-state scope)
+For device-state interpretation from `/api/assets/devices/{id}`, current implementation uses schema-safe heuristics:
 - Available vs occupied: based on `available` bool-ish value, then fallback to `filling` (`EMPTY`/`FULL`).
 - Blocked/restricted count: box activation in `{BLOCKED, INACTIVE, MAINTENANCE, ARCHIVED}` or non-`NONE` security breach.
 - Damaged count: box `hard == DAMAGED`.
 
-These heuristics should be preferred over old assumptions (`status`, `address`, `boxView` fallback).
+For parcel-in-box occupancy, follow the dedicated `boxView` KB in `docs/parcel-events-in-devices-boxview-kb.md`.
 
 ## Maintenance Checklist
 When PMD schemas change:
@@ -198,4 +199,4 @@ When PMD schemas change:
 5. Ensure `agent.py` tool selection hints are still aligned with registered tools.
 
 ## Last analysis date
-- 2026-06-09
+- 2026-06-12

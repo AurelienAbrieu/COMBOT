@@ -7,6 +7,7 @@ from .pmd_client import PMDClientError, client
 
 
 _ACTIVATION_BLOCKING_VALUES = {"BLOCKED", "INACTIVE", "MAINTENANCE", "ARCHIVED"}
+_OCCUPIED_PARCEL_STATUSES = {"LIVCFP", "RETCFM", "LIVBLK", "LIVEXP"}
 
 
 def _normalize_device_payload(payload: object) -> dict:
@@ -104,6 +105,54 @@ def _fetch_device(device_code: str, with_state_event: bool, use_cache: bool) -> 
     return _normalize_device_payload(payload)
 
 
+def _fetch_box_view(device_code: str) -> dict:
+    payload = client.get(f"/api/parcel_events_in_devices/{device_code}/boxView")
+    if isinstance(payload, dict):
+        return payload
+    return {"boxes": []}
+
+
+def _normalize_box_path(box_path: object) -> str:
+    return str(box_path or "").strip().lstrip("/")
+
+
+def _extract_box_view_occupancy(box_view_payload: dict) -> tuple[list[str], int]:
+    boxes = box_view_payload.get("boxes")
+    if not isinstance(boxes, list):
+        return [], 0
+
+    occupied_box_paths: set[str] = set()
+    announced_without_box = 0
+
+    for box in boxes:
+        if not isinstance(box, dict):
+            continue
+
+        parcels = box.get("parcels")
+        if not isinstance(parcels, list):
+            parcels = []
+
+        normalized_box_path = _normalize_box_path(box.get("boxPath"))
+
+        if not normalized_box_path:
+            announced_without_box += len(parcels)
+            continue
+
+        is_occupied = False
+        for parcel in parcels:
+            if not isinstance(parcel, dict):
+                continue
+            status = str(parcel.get("status") or "").upper().strip()
+            if status in _OCCUPIED_PARCEL_STATUSES:
+                is_occupied = True
+                break
+
+        if is_occupied:
+            occupied_box_paths.add(normalized_box_path)
+
+    return sorted(occupied_box_paths), announced_without_box
+
+
 @tool
 def get_locker_status(device_id: str) -> str:
     """Search for the status of a locker based on its device ID.
@@ -138,8 +187,7 @@ def get_locker_status(device_id: str) -> str:
     all_zones = _iter_zones(root_zone)
     box_zones = [z for z in all_zones if str(z.get("type", "")).upper() == "BOX"]
 
-    available_count = 0
-    occupied_count = 0
+    available_by_state_count = 0
     blocked_count = 0
     damaged_count = 0
 
@@ -151,18 +199,26 @@ def get_locker_status(device_id: str) -> str:
         security_breach = str(_state_value(box, "securityBreach") or "NONE").upper()
 
         if available is True:
-            available_count += 1
-        elif available is False:
-            occupied_count += 1
+            available_by_state_count += 1
         elif filling == "EMPTY":
-            available_count += 1
-        elif filling == "FULL":
-            occupied_count += 1
+            available_by_state_count += 1
 
         if activation in _ACTIVATION_BLOCKING_VALUES or security_breach != "NONE":
             blocked_count += 1
         if hard == "DAMAGED":
             damaged_count += 1
+
+    occupied_box_paths: list[str] = []
+    announced_without_box = 0
+    box_view_error = None
+    try:
+        box_view_payload = _fetch_box_view(device_code)
+        occupied_box_paths, announced_without_box = _extract_box_view_occupancy(box_view_payload)
+    except PMDClientError as exc:
+        box_view_error = f"HTTP {exc.status_code}"
+
+    occupied_count = len(occupied_box_paths)
+    estimated_free_count = max(len(box_zones) - occupied_count, 0)
 
     name = str(device_payload.get("name") or device_code)
     generation = str(device_payload.get("generation") or "N/A")
@@ -181,11 +237,20 @@ def get_locker_status(device_id: str) -> str:
         f"Activation: {activation_state}",
         f"Connection: {connection_state}",
         f"Total boxes: {len(box_zones)}",
-        f"Available: {available_count}",
-        f"Occupied: {occupied_count}",
+        f"Available (device state): {available_by_state_count}",
         f"Blocked or restricted: {blocked_count}",
         f"Damaged: {damaged_count}",
     ]
+
+    if box_view_error:
+        lines.append(f"Occupied (parcel events boxView): unavailable ({box_view_error})")
+    else:
+        lines.append(f"Occupied (parcel events boxView): {occupied_count}")
+        lines.append(f"Estimated free (total boxes - occupied): {estimated_free_count}")
+        if announced_without_box:
+            lines.append(f"Announced without allocated boxPath: {announced_without_box}")
+        if occupied_box_paths:
+            lines.append(f"Occupied box paths: {', '.join(occupied_box_paths)}")
 
     return "\n".join(lines)
 

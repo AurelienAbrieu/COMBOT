@@ -29,6 +29,34 @@ def test_locker_status_tool_response(authenticated_page):
 
 
 @pytest.mark.e2e
+def test_locker_status_reports_boxview_occupancy(authenticated_page):
+    device_id = os.environ.get("E2E_DEVICE_ID", DEFAULT_DEMO_LOCKER_ID).strip() or DEFAULT_DEMO_LOCKER_ID
+
+    response = send_and_wait(
+        authenticated_page,
+        (
+            f"For device {device_id}, based on parcel events box view, how many boxes are occupied? "
+            "Reply in one short sentence and include the word 'occupied'."
+        ),
+    )
+
+    assert response.assistant_text.strip(), "Assistant response is empty"
+    lowered = response.assistant_text.lower()
+    if "occupied" not in lowered:
+        response = send_and_wait(
+            authenticated_page,
+            (
+                f"Please answer again for device {device_id}. "
+                "How many boxes are occupied from parcel events box view? Include the word 'occupied'."
+            ),
+        )
+        lowered = response.assistant_text.lower()
+
+    assert "occupied" in lowered
+    assert_timing(response, wall_max_ms=45_000)
+
+
+@pytest.mark.e2e
 def test_locker_snapshot_tool_response(authenticated_page):
     device_id = os.environ.get("E2E_DEVICE_ID", DEFAULT_DEMO_LOCKER_ID).strip() or DEFAULT_DEMO_LOCKER_ID
 

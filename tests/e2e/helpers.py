@@ -36,19 +36,37 @@ def send_and_wait(page: Page, message: str, timeout_ms: int = LLM_RESPONSE_TIMEO
     # Wait for an assistant message to appear
     page.wait_for_selector(".msg.assistant", timeout=timeout_ms)
 
-    # Wait for streaming to complete (no more typing indicator)
+    # Wait for typing indicator to disappear when present.
     try:
         page.wait_for_selector("#typing", state="detached", timeout=timeout_ms)
     except PlaywrightTimeoutError:
         pass
 
-    # Small settle delay
-    page.wait_for_timeout(500)
+    # Wait until the latest assistant message text is stable to avoid reading
+    # a partial streamed response.
+    messages = page.locator(".msg.assistant")
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    stable_for_seconds = 0.9
+    poll_ms = 200
+    last_text = ""
+    stable_since = time.monotonic()
+
+    while time.monotonic() < deadline:
+        count = messages.count()
+        current_text = messages.nth(count - 1).text_content() if count > 0 else ""
+        current_text = current_text or ""
+
+        if current_text != last_text:
+            last_text = current_text
+            stable_since = time.monotonic()
+        elif current_text.strip() and (time.monotonic() - stable_since) >= stable_for_seconds:
+            break
+
+        page.wait_for_timeout(poll_ms)
 
     wall_time_ms = (time.monotonic() - start) * 1000
 
     # Get the last assistant message text
-    messages = page.locator(".msg.assistant")
     count = messages.count()
     assistant_text = messages.nth(count - 1).text_content() if count > 0 else ""
 
