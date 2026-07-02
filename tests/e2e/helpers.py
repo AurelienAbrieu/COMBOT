@@ -7,8 +7,12 @@ Provides:
 
 from __future__ import annotations
 
+import os
+import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -16,12 +20,39 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 LLM_RESPONSE_TIMEOUT_MS = 120_000
 DEFAULT_WALL_MAX_MS = 30_000
+_SAFE_NAME = re.compile(r"[^a-z0-9._-]+")
 
 
 @dataclass
 class ChatResponse:
     assistant_text: str = ""
     wall_time_ms: float = 0
+
+
+def _slugify(value: str) -> str:
+    lowered = (value or "").strip().lower()
+    slug = _SAFE_NAME.sub("-", lowered).strip("-")
+    return slug or "step"
+
+
+def _resolve_screenshot_dir() -> Path:
+    configured = os.environ.get("E2E_SCREENSHOT_DIR", "").strip()
+    if configured:
+        output_dir = Path(configured)
+    else:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+        output_dir = Path(__file__).resolve().parent / "artifacts" / "screenshots" / stamp
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def capture_screenshot(page: Page, scenario: str, step: str) -> Path:
+    """Capture a full-page screenshot and return the created file path."""
+    now = datetime.now(timezone.utc).strftime("%H%M%S")
+    filename = f"{now}_{_slugify(scenario)}_{_slugify(step)}.png"
+    destination = _resolve_screenshot_dir() / filename
+    page.screenshot(path=str(destination), full_page=True)
+    return destination
 
 
 def send_and_wait(page: Page, message: str, timeout_ms: int = LLM_RESPONSE_TIMEOUT_MS) -> ChatResponse:
