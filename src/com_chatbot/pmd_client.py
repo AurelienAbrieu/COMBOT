@@ -174,6 +174,7 @@ class PMDClient:
         if params:
             if isinstance(params, dict):
                 metadata.append(f"param_count={len(params)}")
+                metadata.append(f"params={self._sanitize_log_value(params)}")
             else:
                 metadata.append(f"params_type={type(params).__name__}")
         if json_body is not None:

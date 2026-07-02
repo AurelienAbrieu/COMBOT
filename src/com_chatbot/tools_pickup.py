@@ -1,73 +1,95 @@
 """Tools for pickup code operations (Carrier Operation Manager)."""
 
+import uuid
+
 from strands import tool
 
 from .pmd_client import PMDClientError, client
 
 
-@tool
-def view_pickup_code(parcel_number: str = "", recipient_name: str = "") -> str:
-    """View the pickup code for a parcel. Search by parcel number or recipient name.
-
-    Args:
-        parcel_number: The parcel tracking number. Preferred lookup method.
-        recipient_name: The recipient name to search for. Used when parcel number is unknown.
+def _resolve_parcel_id_from_number(parcel_number: str) -> tuple[str | None, str | None]:
+    """Resolve parcel UUID from a parcel number using tracking-parcel search endpoint.
 
     Returns:
-        The pickup code (PIN) for the parcel, or an error message.
+        (parcel_id, error_message)
     """
     number = (parcel_number or "").strip()
-    name = (recipient_name or "").strip()
+    if not number:
+        return None, "Error: parcel_number is required."
 
-    if not number and not name:
-        return "Error: provide either a parcel_number or a recipient_name."
+    params = {
+        "size": "100",
+        "from": "0",
+        "sortorder": "desc",
+        "sortfield": "current.event.occurredAt",
+        "attributes.handlingUnit.originalParcelNumber": f'"{number}"',
+    }
 
-    # If parcel number is provided, look up directly
-    if number:
-        try:
-            results = client.get("/api/parcels/tracking", params={"trackingNumber": number})
-        except PMDClientError as exc:
-            return f"Error: unable to look up parcel {number} (HTTP {exc.status_code})."
-
-        parcels = results if isinstance(results, list) else (results.get("items") or results.get("parcels") or [])
-        if not parcels:
-            return f"No parcel found with tracking number {number}."
-
-        parcel = parcels[0] if isinstance(parcels, list) and parcels else parcels
-        if isinstance(parcel, dict):
-            pin = parcel.get("pinCode") or parcel.get("pickupCode") or parcel.get("accessCode")
-            if pin:
-                return f"Pickup code for parcel {number}: {pin}"
-            parcel_id = parcel.get("id") or parcel.get("parcelId")
-            if parcel_id:
-                try:
-                    detail = client.get(f"/api/parcels/{parcel_id}/pincode")
-                    pin = detail.get("pinCode") or detail.get("code") or detail.get("pin")
-                    if pin:
-                        return f"Pickup code for parcel {number}: {pin}"
-                except PMDClientError:
-                    pass
-            return f"Pickup code not available for parcel {number}."
-
-    # Search by recipient name
     try:
-        results = client.get("/api/parcels", params={"query": name, "status": "LOADED"})
+        results = client.get("/api/tracking-parcel/parcels", params=params)
     except PMDClientError as exc:
-        return f"Error: unable to search parcels for recipient '{name}' (HTTP {exc.status_code})."
+        return None, f"Error: unable to look up parcel {number} (HTTP {exc.status_code})."
 
-    parcels = results if isinstance(results, list) else (results.get("items") or results.get("parcels") or [])
-    if not parcels:
-        return f"No loaded parcels found for recipient '{name}'."
+    data = results.get("data") if isinstance(results, dict) else []
+    if not isinstance(data, list) or not data:
+        return None, f"No parcel found with tracking number {number}."
 
-    lines = []
-    for p in (parcels if isinstance(parcels, list) else [parcels]):
-        if not isinstance(p, dict):
-            continue
-        p_num = p.get("trackingNumber") or p.get("parcelNumber") or "N/A"
-        pin = p.get("pinCode") or p.get("pickupCode") or "N/A"
-        lines.append(f"Parcel {p_num}: pickup code = {pin}")
+    first = data[0] if isinstance(data[0], dict) else {}
+    src = first.get("_source") if isinstance(first, dict) else {}
+    attrs = src.get("attributes") if isinstance(src, dict) else {}
+    parcel_id = str((attrs.get("id") if isinstance(attrs, dict) else "") or "").strip()
+    if not parcel_id:
+        return None, f"Unable to determine parcel ID for tracking number {number}."
 
-    return "\n".join(lines) if lines else f"No pickup codes found for '{name}'."
+    try:
+        uuid.UUID(parcel_id)
+    except ValueError:
+        return None, f"Invalid parcel ID returned for tracking number {number}: {parcel_id}."
+
+    return parcel_id, None
+
+
+@tool
+def view_pickup_code(parcel_id: str = "", parcel_number: str = "") -> str:
+    """View the pickup PIN code for a parcel.
+
+    Args:
+        parcel_id: Optional parcel UUID used by PMD API.
+        parcel_number: The parcel tracking number known by end users. Preferred user input.
+
+    Returns:
+        The pickup PIN code for the parcel, or an error message.
+    """
+    requested_id = (parcel_id or "").strip()
+    number = (parcel_number or "").strip()
+
+    if not requested_id and not number:
+        return "Error: provide parcel_id (UUID) or parcel_number."
+
+    resolved_id = requested_id
+    if resolved_id:
+        try:
+            uuid.UUID(resolved_id)
+        except ValueError:
+            return "Error: parcel_id must be a valid UUID."
+
+    if not resolved_id:
+        resolved_id, error = _resolve_parcel_id_from_number(number)
+        if error:
+            return error
+
+    try:
+        pin_payload = client.get(f"/api/pincode/{resolved_id}")
+    except PMDClientError as exc:
+        return f"Error: unable to retrieve pickup PIN for parcel {resolved_id} (HTTP {exc.status_code})."
+
+    pin = pin_payload.get("pinCode1") if isinstance(pin_payload, dict) else None
+    if not pin:
+        return f"Pickup PIN code not available for parcel {resolved_id}."
+
+    if number:
+        return f"Pickup PIN code for parcel {number} (id {resolved_id}): {pin}"
+    return f"Pickup PIN code for parcel id {resolved_id}: {pin}"
 
 
 @tool
@@ -86,23 +108,9 @@ def resend_pickup_code(parcel_number: str) -> str:
     if not number:
         return "Error: parcel_number is required."
 
-    # Look up the parcel to get its ID
-    try:
-        results = client.get("/api/parcels/tracking", params={"trackingNumber": number})
-    except PMDClientError as exc:
-        return f"Error: unable to look up parcel {number} (HTTP {exc.status_code})."
-
-    parcels = results if isinstance(results, list) else (results.get("items") or results.get("parcels") or [])
-    if not parcels:
-        return f"No parcel found with tracking number {number}."
-
-    parcel = parcels[0] if isinstance(parcels, list) else parcels
-    if not isinstance(parcel, dict):
-        return f"Unexpected response format for parcel {number}."
-
-    parcel_id = parcel.get("id") or parcel.get("parcelId")
-    if not parcel_id:
-        return f"Unable to determine parcel ID for {number}."
+    parcel_id, error = _resolve_parcel_id_from_number(number)
+    if error:
+        return error
 
     try:
         client.post(f"/api/parcels/{parcel_id}/resendPinCode")

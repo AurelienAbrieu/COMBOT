@@ -355,13 +355,25 @@ def get_locker_device_snapshot(device_id: str) -> str:
 
 
 @tool
-def search_parcels(device_ids: str = "", statuses: str = "", parcel_number: str = "") -> str:
+def search_parcels(
+    device_ids: str = "",
+    statuses: str = "",
+    parcel_number: str = "",
+    logistician: str = "",
+    logistician_code: str = "",
+    logistician_name: str = "",
+    exclude_statuses: str = "",
+) -> str:
     """Search parcels in lockers by device ID(s) and/or status, or look up a parcel by tracking number.
 
     Args:
         device_ids: Comma-separated locker device IDs (e.g. "GBR00043,GBR22042"). Used to list parcels in specific lockers.
-        statuses: Comma-separated parcel statuses to filter (e.g. "RETCFM,LIVEXP,LIVBLK" for parcels to pick up, "LIVCFP" for loaded parcels). Optional.
+        statuses: Comma-separated parcel statuses to filter (e.g. "RETCFM,LIVEXP,LIVBLK" for parcels to pick up, "LIVCFP" for parcels already in a device, "EXPINI" for parcels awaiting delivery). Optional.
         parcel_number: A parcel tracking/barcode number to look up (e.g. "7614335752"). When provided, device_ids and statuses are ignored.
+        logistician: Optional logistician identifier accepted as either code or exact name.
+        logistician_code: Optional logistician code used to keep only parcels belonging to that logistician.
+        logistician_name: Optional logistician exact name used to keep only parcels belonging to that logistician.
+        exclude_statuses: Optional comma-separated statuses to exclude after retrieval (e.g. "LIVCFP").
 
     Returns:
         A text summary of matching parcels with status, box, recipient, and dates.
@@ -369,19 +381,31 @@ def search_parcels(device_ids: str = "", statuses: str = "", parcel_number: str 
     number = (parcel_number or "").strip()
     devices = (device_ids or "").strip()
     status_filter = (statuses or "").strip()
+    logistician_any_filter = (logistician or "").strip()
+    logistician_filter = (logistician_code or "").strip()
+    logistician_name_filter = (logistician_name or "").strip()
+    excluded_statuses = {s.strip().upper() for s in (exclude_statuses or "").split(",") if s.strip()}
 
-    if not number and not devices:
-        return "Error: provide at least device_ids or parcel_number."
+    if not number and not devices and not logistician_filter and not logistician_name_filter and not logistician_any_filter:
+        return "Error: provide at least device_ids, logistician, logistician_code, logistician_name, or parcel_number."
 
     params: dict = {"size": "100", "from": "0", "sortorder": "desc", "sortfield": "current.event.occurredAt"}
 
     if number:
         params["attributes.handlingUnit.originalParcelNumber"] = f'"{number}"'
     else:
-        params["fterms_events.locker.deviceCode.keyword"] = devices
+        if devices:
+            # Canonical endpoint contract for parcels by locker state.
+            params["fterms_events.locker.deviceCode"] = devices
         params["nestedSearch"] = "false"
         if status_filter:
-            params["fterms_current.event.status.keyword"] = status_filter
+            status_values = [s.strip().upper() for s in status_filter.split(",") if s.strip()]
+            # In tracking-parcel views, loaded parcels are reliably exposed via trackingEvent filters.
+            if status_values and all(s == "LIVCFP" for s in status_values):
+                params["fterms_trackingEvent.status"] = "LIVCFP"
+                params["fterms_trackingEvent.isInDevice"] = "true"
+            else:
+                params["fterms_current.event.status"] = status_filter
 
     try:
         results = client.get("/api/tracking-parcel/parcels", params=params)
@@ -392,31 +416,93 @@ def search_parcels(device_ids: str = "", statuses: str = "", parcel_number: str 
     if not isinstance(data, list) or not data:
         if number:
             return f"No parcel found with tracking number {number}."
+        if logistician_filter or logistician_name_filter or logistician_any_filter:
+            requested = logistician_filter or logistician_name_filter or logistician_any_filter
+            return f"No parcels found for logistician {requested}."
         return f"No parcels found for device(s) {devices}."
 
-    total = results.get("total", len(data))
+    filtered_items: list[dict] = []
+    logistician_filter_upper = logistician_filter.upper()
+    logistician_name_filter_folded = logistician_name_filter.casefold()
+    logistician_any_filter_upper = logistician_any_filter.upper()
+    logistician_any_filter_folded = logistician_any_filter.casefold()
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+
+        src = item.get("_source") or {}
+        attrs = src.get("attributes") or {}
+        current = src.get("current") if isinstance(src.get("current"), dict) else {}
+        current_event = current.get("event") if isinstance(current.get("event"), dict) else {}
+        tracking_event = src.get("trackingEvent") if isinstance(src.get("trackingEvent"), dict) else {}
+        te = tracking_event or current_event
+
+        current_status = str(te.get("status") or "").upper().strip()
+        if excluded_statuses and current_status in excluded_statuses:
+            continue
+
+        item_logistician = attrs.get("logistician") or {}
+        item_logistician_code = str(item_logistician.get("code") or "").upper().strip()
+        item_logistician_name = str(item_logistician.get("name") or "").strip()
+        item_logistician_name_folded = item_logistician_name.casefold()
+
+        if logistician_filter_upper:
+            if item_logistician_code != logistician_filter_upper:
+                continue
+
+        if logistician_name_filter_folded:
+            if item_logistician_name_folded != logistician_name_filter_folded:
+                continue
+
+        if logistician_any_filter:
+            if item_logistician_code != logistician_any_filter_upper and item_logistician_name_folded != logistician_any_filter_folded:
+                continue
+
+        filtered_items.append(item)
+
+    if not filtered_items:
+        if number:
+            return f"No parcel found with tracking number {number}."
+        effective_logistician = logistician_filter or logistician_name_filter or logistician_any_filter
+        if effective_logistician and status_filter and excluded_statuses:
+            return (
+                f"No parcels found for logistician {effective_logistician} "
+                f"with statuses {status_filter} excluding {', '.join(sorted(excluded_statuses))}."
+            )
+        if effective_logistician:
+            return f"No parcels found for logistician {effective_logistician}."
+        return "No parcels found with the requested filters."
+
+    total = len(filtered_items)
     lines = [f"Total parcels: {total}"]
 
-    for item in data:
+    for item in filtered_items:
         src = item.get("_source") or {} if isinstance(item, dict) else {}
         attrs = src.get("attributes") or {}
-        te = src.get("trackingEvent") or {}
+        current = src.get("current") if isinstance(src.get("current"), dict) else {}
+        current_event = current.get("event") if isinstance(current.get("event"), dict) else {}
+        tracking_event = src.get("trackingEvent") if isinstance(src.get("trackingEvent"), dict) else {}
+        te = tracking_event or current_event
         contact = attrs.get("contact") or {}
         logist = attrs.get("logistician") or {}
-        box = te.get("boxAllocated") or {}
+        locker = te.get("locker") if isinstance(te.get("locker"), dict) else {}
+        box = te.get("boxAllocated") if isinstance(te.get("boxAllocated"), dict) else (locker.get("boxAllocated") or {})
 
         barcode = attrs.get("parcelBarcode") or attrs.get("parcelNumber") or "N/A"
         cur_status = te.get("status") or "N/A"
         phase = te.get("phase") or "N/A"
-        in_device = te.get("isInDevice")
-        expired = te.get("isExpired")
-        blocked = te.get("isBlocked")
-        box_info = f"{box.get('boxAlias', 'N/A')} ({box.get('size', '?')})" if box else "N/A"
+        in_device = te.get("isInDevice") if te.get("isInDevice") is not None else locker.get("isInDevice")
+        expired = te.get("isExpired") if te.get("isExpired") is not None else locker.get("isExpired")
+        blocked = te.get("isBlocked") if te.get("isBlocked") is not None else locker.get("isBlocked")
+
+        box_alias = locker.get("boxAlias") or box.get("boxAlias") or locker.get("boxNumber") or "N/A"
+        box_size = box.get("size") or "?"
+        box_info = f"{box_alias} ({box_size})" if box else box_alias
         recipient = f"{contact.get('firstName', '')} {contact.get('lastName', '')}".strip() or "N/A"
         delivery = attrs.get("deliveryDate") or "N/A"
         expiration = attrs.get("expirationDate") or "N/A"
         logist_info = f"{logist.get('name', '')} ({logist.get('code', '')})".strip(" ()") if logist else "N/A"
-        device_code = (src.get("device") or {}).get("deviceCode") or "N/A"
+        device_code = locker.get("deviceCode") or (src.get("device") or {}).get("deviceCode") or "N/A"
 
         flags = []
         if in_device:

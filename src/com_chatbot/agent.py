@@ -127,14 +127,24 @@ Confirmation flow for modifications:
 - "status of locker" / "locker status" / "device status" → get_locker_status (pass the device ID)
 - "zone status" / "status of zone" / "state of box" → get_locker_zone_status (pass device ID and exact zone path)
 - "device snapshot" / "raw device payload" / "technical details of locker" → get_locker_device_snapshot (pass device ID)
-- "parcel status" / "where is parcel" / "track parcel" / "parcels in locker" / "parcels to pick up" / "colis à récupérer" → search_parcels (pass device_ids and/or parcel_number; use statuses="RETCFM,LIVEXP,LIVBLK" for parcels to collect, "LIVCFP" for loaded parcels)
-- "pickup code" / "view code" / "PIN code" / "access code for parcel" → view_pickup_code
+- "parcel status" / "where is parcel" / "track parcel" / "parcels in locker" / "parcels to pick up" / "colis à récupérer" / "parcels to deliver" → search_parcels (pass device_ids and/or parcel_number; use statuses="RETCFM,LIVEXP,LIVBLK" for parcels to collect, statuses="LIVCFP" for parcels already loaded inside a device, and statuses="EXPINI" with logistician code or name via logistician / logistician_code / logistician_name for parcels awaiting delivery)
+- "pickup code" / "view code" / "PIN code" / "access code for parcel" → view_pickup_code (typically pass parcel_number from the user; resolve parcel UUID via /api/tracking-parcel/parcels, then call /api/pincode/{parcel_id})
 - "resend code" / "resend notification" / "send pickup code again" → resend_pickup_code
 - "nearby lockers" / "lockers in the area" / "find locker" / "available lockers" / "accessible devices" / "devices I can access" / "active or maintenance devices" → find_nearby_lockers (optionally pass GPS coordinates, radius, statuses, or no coordinates for a full accessible-device list)
 - "add courier" / "register carrier" / "new delivery agent" → add_courier
 - "remove courier" / "delete carrier" / "unregister delivery agent" → remove_courier
 - "generate report" / "send report" / "report by email" / "occupation rate" / "activity report" → generate_report
 - "number of parcels dropped" / "parcel drop count" → generate_report with report_type="parcel_drop"
+
+## Status semantics (must follow exactly):
+- EXPINI = parcel shipped/announced and not yet loaded into a device (awaiting delivery).
+- LIVCFP = parcel already loaded inside a device (ready for pickup), not awaiting delivery.
+- For "parcels to deliver" requests from a logistician, use search_parcels with statuses="EXPINI" and logistician identifier (code or exact name).
+
+## Locker parcel-state source of truth:
+- For parcel state inside one locker (examples: "parcels delivered in DEMO00002", "parcels in locker", "which parcels are loaded"), use search_parcels against /api/tracking-parcel/parcels with device filter.
+- Do not infer parcel lists from get_locker_status output.
+- get_locker_status is for device state/occupancy context; detailed parcel state/listing comes from search_parcels.
 
 ## Period interpretation:
 - "since beginning of the month" → use first day of current month
