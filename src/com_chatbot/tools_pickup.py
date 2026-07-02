@@ -1,5 +1,6 @@
 """Tools for pickup code operations (Carrier Operation Manager)."""
 
+from datetime import datetime, timezone
 import uuid
 
 from strands import tool
@@ -47,6 +48,153 @@ def _resolve_parcel_id_from_number(parcel_number: str) -> tuple[str | None, str 
         return None, f"Invalid parcel ID returned for tracking number {number}: {parcel_id}."
 
     return parcel_id, None
+
+
+def _resolve_tracking_parcel_source(parcel_number: str) -> tuple[dict | None, str | None]:
+    """Resolve the first tracking-parcel hit _source for a parcel number."""
+    number = (parcel_number or "").strip()
+    if not number:
+        return None, "Error: parcel_number is required."
+
+    params = {
+        "size": "100",
+        "from": "0",
+        "sortorder": "desc",
+        "sortfield": "current.event.occurredAt",
+        "attributes.handlingUnit.originalParcelNumber": f'"{number}"',
+    }
+
+    try:
+        results = client.get("/api/tracking-parcel/parcels", params=params)
+    except PMDClientError as exc:
+        return None, f"Error: unable to look up parcel {number} (HTTP {exc.status_code})."
+
+    data = results.get("data") if isinstance(results, dict) else []
+    if not isinstance(data, list) or not data:
+        return None, f"No parcel found with tracking number {number}."
+
+    first = data[0] if isinstance(data[0], dict) else {}
+    source = first.get("_source") if isinstance(first, dict) else {}
+    if not isinstance(source, dict):
+        return None, f"Invalid tracking payload for parcel {number}."
+
+    return source, None
+
+
+def _first_non_empty(*values: object) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _extract_box_path_from_events(source: dict) -> str:
+    events = source.get("events")
+    if not isinstance(events, list):
+        return ""
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        locker = event.get("locker")
+        if not isinstance(locker, dict):
+            continue
+        box_path = _first_non_empty(locker.get("boxPath"))
+        if box_path:
+            return box_path
+    return ""
+
+
+def _extract_box_allocated(source: dict) -> tuple[dict | None, str | None]:
+    current = source.get("current") if isinstance(source, dict) else {}
+    current_event = current.get("event") if isinstance(current, dict) else {}
+    current_locker = current_event.get("locker") if isinstance(current_event, dict) else {}
+
+    tracking_event = source.get("trackingEvent") if isinstance(source, dict) else {}
+    tracking_box_allocated = tracking_event.get("boxAllocated") if isinstance(tracking_event, dict) else {}
+
+    current_box_allocated = current_locker.get("boxAllocated") if isinstance(current_locker, dict) else {}
+
+    code = _first_non_empty(
+        current_box_allocated.get("code") if isinstance(current_box_allocated, dict) else "",
+        tracking_box_allocated.get("code") if isinstance(tracking_box_allocated, dict) else "",
+    )
+    size = _first_non_empty(
+        current_box_allocated.get("size") if isinstance(current_box_allocated, dict) else "",
+        tracking_box_allocated.get("size") if isinstance(tracking_box_allocated, dict) else "",
+    )
+
+    if not code:
+        return None, "Unable to determine boxAllocated.code from tracking parcel payload."
+    if not size:
+        return None, "Unable to determine boxAllocated.size from tracking parcel payload."
+
+    return {"code": code, "size": size}, None
+
+
+def _utc_now_iso_millis() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _build_pinres_payload(source: dict, requested_parcel_number: str) -> tuple[dict | None, str | None]:
+    attrs = source.get("attributes") if isinstance(source, dict) else {}
+    if not isinstance(attrs, dict):
+        return None, "Invalid tracking parcel payload: attributes missing."
+
+    logistician = attrs.get("logistician") if isinstance(attrs, dict) else {}
+    if not isinstance(logistician, dict):
+        return None, "Unable to determine logistician information from tracking parcel payload."
+
+    current = source.get("current") if isinstance(source, dict) else {}
+    current_event = current.get("event") if isinstance(current, dict) else {}
+    current_locker = current_event.get("locker") if isinstance(current_event, dict) else {}
+    device = source.get("device") if isinstance(source, dict) else {}
+
+    device_code = _first_non_empty(
+        current_locker.get("deviceCode") if isinstance(current_locker, dict) else "",
+        device.get("deviceCode") if isinstance(device, dict) else "",
+    )
+    if not device_code:
+        return None, "Unable to determine deviceCode from tracking parcel payload."
+
+    logistician_code = _first_non_empty(logistician.get("code"))
+    if not logistician_code:
+        return None, "Unable to determine logisticianCode from tracking parcel payload."
+
+    logistician_name = _first_non_empty(logistician.get("name"))
+    if not logistician_name:
+        return None, "Unable to determine logisticianName from tracking parcel payload."
+
+    parcel_number = _first_non_empty(requested_parcel_number, attrs.get("parcelNumber"), attrs.get("parcelBarcode"))
+    if not parcel_number:
+        return None, "Unable to determine parcel.parcelNumber from tracking parcel payload."
+
+    box_path = _first_non_empty(
+        current_locker.get("boxPath") if isinstance(current_locker, dict) else "",
+        _extract_box_path_from_events(source),
+    )
+    if not box_path:
+        return None, "Unable to determine boxPath from tracking parcel payload."
+
+    box_allocated, box_error = _extract_box_allocated(source)
+    if box_error:
+        return None, box_error
+
+    pickup_allowed_until = _first_non_empty(attrs.get("expirationDate"))
+    if not pickup_allowed_until:
+        return None, "Unable to determine pickupAllowedUntil from tracking parcel payload."
+
+    payload = {
+        "timestamp": _utc_now_iso_millis(),
+        "deviceCode": device_code,
+        "logisticianCode": logistician_code,
+        "logisticianName": logistician_name,
+        "parcel": {"parcelNumber": parcel_number},
+        "boxPath": box_path,
+        "boxAllocated": box_allocated,
+        "pickupAllowedUntil": pickup_allowed_until,
+    }
+    return payload, None
 
 
 @tool
@@ -108,12 +256,16 @@ def resend_pickup_code(parcel_number: str) -> str:
     if not number:
         return "Error: parcel_number is required."
 
-    parcel_id, error = _resolve_parcel_id_from_number(number)
+    source, error = _resolve_tracking_parcel_source(number)
     if error:
         return error
 
+    payload, payload_error = _build_pinres_payload(source or {}, number)
+    if payload_error:
+        return f"Error: failed to build PINRES payload for {number}. {payload_error}"
+
     try:
-        client.post(f"/api/parcels/{parcel_id}/resendPinCode")
+        client.post("/api/parcel_commands/add_event/PINRES", json_body=payload)
     except PMDClientError as exc:
         return f"Error: failed to resend pickup code for {number} (HTTP {exc.status_code})."
 

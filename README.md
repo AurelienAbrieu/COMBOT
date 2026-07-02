@@ -75,6 +75,16 @@ On this Windows setup, `--reload` can leave Uvicorn listening on `:8000` without
 
 Open http://127.0.0.1:8000 in your browser.
 
+### Run (Web) with verbose PMD request payload logs
+
+PowerShell:
+
+```powershell
+$env:PMD_LOG_VERBOSE_PAYLOADS="1"; python -m uvicorn web_app:app --host 127.0.0.1 --port 8000
+```
+
+This enables request/response payload logging in `var/log/com-chatbot/pmd_api.log` for debugging E2E JSON bodies.
+
 ### Run (CLI)
 
 ```bash
@@ -84,11 +94,18 @@ python main.py
 ### Run Tests
 
 ```bash
-# E2E tests (start server first)
+# E2E tests
+# By default, E2E fixtures start a dedicated local Uvicorn server on 127.0.0.1:8001
 pytest tests/e2e/ --headed -v
 
 # Unit tests
 pytest tests/unit/ -v
+```
+
+Optional: override with an explicit app URL:
+
+```bash
+pytest tests/e2e/ -v --base-url http://127.0.0.1:8000
 ```
 
 If you use the VS Code tasks in this repo, they assume the project environment is `.venv`.
