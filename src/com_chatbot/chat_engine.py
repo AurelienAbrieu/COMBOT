@@ -108,7 +108,7 @@ _TOOL_LABELS: dict[str, str] = {
     "get_locker_status": "Checking locker status...",
     "get_locker_zone_status": "Checking locker zone status...",
     "get_locker_device_snapshot": "Collecting locker technical snapshot...",
-    "check_parcel_status": "Looking up parcel...",
+    "search_parcels": "Searching parcels...",
     "view_pickup_code": "Retrieving pickup code...",
     "resend_pickup_code": "Resending pickup code...",
     "find_nearby_lockers": "Searching nearby lockers...",

@@ -88,7 +88,7 @@ from .tools_status import (
     get_locker_status,
     get_locker_zone_status,
     get_locker_device_snapshot,
-    check_parcel_status,
+    search_parcels,
 )
 from .tools_pickup import (
     view_pickup_code,
@@ -127,7 +127,7 @@ Confirmation flow for modifications:
 - "status of locker" / "locker status" / "device status" → get_locker_status (pass the device ID)
 - "zone status" / "status of zone" / "state of box" → get_locker_zone_status (pass device ID and exact zone path)
 - "device snapshot" / "raw device payload" / "technical details of locker" → get_locker_device_snapshot (pass device ID)
-- "parcel status" / "where is parcel" / "track parcel" → check_parcel_status (pass the tracking number)
+- "parcel status" / "where is parcel" / "track parcel" / "parcels in locker" / "parcels to pick up" / "colis à récupérer" → search_parcels (pass device_ids and/or parcel_number; use statuses="RETCFM,LIVEXP,LIVBLK" for parcels to collect, "LIVCFP" for loaded parcels)
 - "pickup code" / "view code" / "PIN code" / "access code for parcel" → view_pickup_code
 - "resend code" / "resend notification" / "send pickup code again" → resend_pickup_code
 - "nearby lockers" / "lockers in the area" / "find locker" / "available lockers" / "accessible devices" / "devices I can access" / "active or maintenance devices" → find_nearby_lockers (optionally pass GPS coordinates, radius, statuses, or no coordinates for a full accessible-device list)
@@ -170,7 +170,7 @@ def create_agent() -> Agent:
             get_locker_status,
             get_locker_zone_status,
             get_locker_device_snapshot,
-            check_parcel_status,
+            search_parcels,
             view_pickup_code,
             resend_pickup_code,
             find_nearby_lockers,

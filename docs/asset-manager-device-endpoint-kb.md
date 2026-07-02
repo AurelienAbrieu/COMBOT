@@ -170,8 +170,8 @@ These are critical for robust client parsing:
 - Must rely on root zone location coordinates (`deviceDescription.zone.attributes.location.coordinates`) and root state, not legacy top-level `address/status`.
 
 ### Parcel/pickup/courier/report tools
-1. `check_parcel_status`
-- Pertinent: separate domain (parcel lifecycle) from device health.
+1. `search_parcels`
+- Pertinent: searches parcels by device ID(s), status filter, or tracking number via `/api/tracking-parcel/parcels`.
 
 2. `view_pickup_code` and `resend_pickup_code`
 - Pertinent: recipient support operations, not overlapping with device status.

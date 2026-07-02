@@ -355,53 +355,81 @@ def get_locker_device_snapshot(device_id: str) -> str:
 
 
 @tool
-def check_parcel_status(parcel_number: str) -> str:
-    """Search for the current status of a parcel based on its parcel/tracking number.
+def search_parcels(device_ids: str = "", statuses: str = "", parcel_number: str = "") -> str:
+    """Search parcels in lockers by device ID(s) and/or status, or look up a parcel by tracking number.
 
     Args:
-        parcel_number: The parcel tracking number (e.g. H05QTA0216703036).
+        device_ids: Comma-separated locker device IDs (e.g. "GBR00043,GBR22042"). Used to list parcels in specific lockers.
+        statuses: Comma-separated parcel statuses to filter (e.g. "RETCFM,LIVEXP,LIVBLK" for parcels to pick up, "LIVCFP" for loaded parcels). Optional.
+        parcel_number: A parcel tracking/barcode number to look up (e.g. "7614335752"). When provided, device_ids and statuses are ignored.
 
     Returns:
-        A text summary of the parcel status including drop-off time, location,
-        and current state.
+        A text summary of matching parcels with status, box, recipient, and dates.
     """
     number = (parcel_number or "").strip()
-    if not number:
-        return "Error: parcel_number is required."
+    devices = (device_ids or "").strip()
+    status_filter = (statuses or "").strip()
+
+    if not number and not devices:
+        return "Error: provide at least device_ids or parcel_number."
+
+    params: dict = {"size": "100", "from": "0", "sortorder": "desc", "sortfield": "current.event.occurredAt"}
+
+    if number:
+        params["attributes.handlingUnit.originalParcelNumber"] = f'"{number}"'
+    else:
+        params["fterms_events.locker.deviceCode.keyword"] = devices
+        params["nestedSearch"] = "false"
+        if status_filter:
+            params["fterms_current.event.status.keyword"] = status_filter
 
     try:
-        results = client.get("/api/parcels/tracking", params={"trackingNumber": number})
+        results = client.get("/api/tracking-parcel/parcels", params=params)
     except PMDClientError as exc:
-        return f"Error: unable to look up parcel {number} (HTTP {exc.status_code})."
+        return f"Error: unable to search parcels (HTTP {exc.status_code})."
 
-    if isinstance(results, list):
-        parcels = results
-    elif isinstance(results, dict):
-        parcels = results.get("items") or results.get("parcels") or results.get("data") or []
-        if not isinstance(parcels, list):
-            parcels = [results]
-    else:
-        parcels = []
+    data = results.get("data") if isinstance(results, dict) else []
+    if not isinstance(data, list) or not data:
+        if number:
+            return f"No parcel found with tracking number {number}."
+        return f"No parcels found for device(s) {devices}."
 
-    if not parcels:
-        return f"No parcel found with tracking number {number}."
+    total = results.get("total", len(data))
+    lines = [f"Total parcels: {total}"]
 
-    lines = []
-    for parcel in parcels:
-        if not isinstance(parcel, dict):
-            continue
-        p_number = parcel.get("trackingNumber") or parcel.get("parcelNumber") or number
-        status = parcel.get("status") or parcel.get("lastEventCode") or "unknown"
-        drop_date = parcel.get("dropDate") or parcel.get("createdAt") or "N/A"
-        device = parcel.get("deviceCode") or parcel.get("deviceName") or "N/A"
-        box = parcel.get("boxNumber") or parcel.get("box") or "N/A"
-        recipient = parcel.get("recipientName") or parcel.get("recipient") or "N/A"
+    for item in data:
+        src = item.get("_source") or {} if isinstance(item, dict) else {}
+        attrs = src.get("attributes") or {}
+        te = src.get("trackingEvent") or {}
+        contact = attrs.get("contact") or {}
+        logist = attrs.get("logistician") or {}
+        box = te.get("boxAllocated") or {}
 
-        lines.append(f"Parcel: {p_number}")
-        lines.append(f"  Status: {status}")
-        lines.append(f"  Drop date: {drop_date}")
-        lines.append(f"  Device: {device}")
-        lines.append(f"  Box: {box}")
-        lines.append(f"  Recipient: {recipient}")
+        barcode = attrs.get("parcelBarcode") or attrs.get("parcelNumber") or "N/A"
+        cur_status = te.get("status") or "N/A"
+        phase = te.get("phase") or "N/A"
+        in_device = te.get("isInDevice")
+        expired = te.get("isExpired")
+        blocked = te.get("isBlocked")
+        box_info = f"{box.get('boxAlias', 'N/A')} ({box.get('size', '?')})" if box else "N/A"
+        recipient = f"{contact.get('firstName', '')} {contact.get('lastName', '')}".strip() or "N/A"
+        delivery = attrs.get("deliveryDate") or "N/A"
+        expiration = attrs.get("expirationDate") or "N/A"
+        logist_info = f"{logist.get('name', '')} ({logist.get('code', '')})".strip(" ()") if logist else "N/A"
+        device_code = (src.get("device") or {}).get("deviceCode") or "N/A"
+
+        flags = []
+        if in_device:
+            flags.append("inDevice")
+        if expired:
+            flags.append("expired")
+        if blocked:
+            flags.append("blocked")
+
+        lines.append(f"---\nParcel: {barcode} | Device: {device_code}")
+        lines.append(f"  Status: {cur_status} ({phase})" + (f" [{', '.join(flags)}]" if flags else ""))
+        lines.append(f"  Box: {box_info} | Recipient: {recipient}")
+        lines.append(f"  Delivered: {delivery} | Expires: {expiration}")
+        lines.append(f"  Logistician: {logist_info}")
 
     return "\n".join(lines)
