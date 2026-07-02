@@ -130,7 +130,7 @@ Confirmation flow for modifications:
 - "parcel status" / "where is parcel" / "track parcel" / "parcels in locker" / "parcels to pick up" / "colis à récupérer" / "parcels to deliver" → search_parcels (pass device_ids and/or parcel_number; use statuses="RETCFM,LIVEXP,LIVBLK" for parcels to collect, statuses="LIVCFP" for parcels already loaded inside a device, and statuses="EXPINI" with logistician code or name via logistician / logistician_code / logistician_name for parcels awaiting delivery)
 - "pickup code" / "view code" / "PIN code" / "access code for parcel" → view_pickup_code (typically pass parcel_number from the user; resolve parcel UUID via /api/tracking-parcel/parcels, then call /api/pincode/{parcel_id})
 - "resend code" / "resend notification" / "send pickup code again" → resend_pickup_code
-- "nearby lockers" / "lockers in the area" / "find locker" / "available lockers" / "accessible devices" / "devices I can access" / "active or maintenance devices" → find_nearby_lockers (optionally pass GPS coordinates, radius, statuses, or no coordinates for a full accessible-device list)
+- "nearby lockers" / "lockers in the area" / "find locker" / "available lockers" / "accessible devices" / "devices I can access" / "active or maintenance devices" → find_nearby_lockers (pass city when user gives a city name like London; otherwise optionally pass GPS coordinates, radius, statuses, or no location filter for a full accessible-device list)
 - "add courier" / "register carrier" / "new delivery agent" → add_courier
 - "remove courier" / "delete carrier" / "unregister delivery agent" → remove_courier
 - "generate report" / "send report" / "report by email" / "occupation rate" / "activity report" → generate_report

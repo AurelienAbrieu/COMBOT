@@ -28,6 +28,7 @@ def _normalize_statuses(statuses: str) -> list[str]:
 
 
 def _search_tracking_devices(
+    city: str | None,
     latitude: float | None,
     longitude: float | None,
     radius_km: float,
@@ -39,7 +40,9 @@ def _search_tracking_devices(
     if statuses:
         params["fterms_attributes.status"] = ",".join(statuses)
 
-    if latitude is not None and longitude is not None:
+    if city:
+        params["fterms_attributes.site.city"] = city
+    elif latitude is not None and longitude is not None:
         params["fgeo_attributes.site.coordinates"] = f"{latitude},{longitude}_{radius_km}_km"
 
     payload = client.get("/api/tracking-device/devices", params=params)
@@ -111,35 +114,41 @@ def _format_device_line(hit: dict, include_distance: bool) -> str:
 
 @tool
 def find_nearby_lockers(
+    city: str = "",
     latitude: float | None = None,
     longitude: float | None = None,
     radius_km: float = 5.0,
     statuses: str = "",
-    limit: int = 100,
+    limit: int = 10,
 ) -> str:
     """List accessible lockers/devices, optionally filtered by area and status.
 
     Uses the tracking-device/device-view API, which already enforces the current user's
-    access scope. If latitude/longitude are provided, the search is restricted to SITE-based
-    devices around those coordinates. If statuses are provided, filtering is delegated to the API.
+    access scope. If city is provided, filtering is delegated to the API with exact city matching.
+    Otherwise, if latitude/longitude are provided, the search is restricted to SITE-based devices
+    around those coordinates. If statuses are provided, filtering is delegated to the API.
 
     Args:
+        city: Optional city name (for example "London").
         latitude: Optional GPS latitude.
         longitude: Optional GPS longitude.
         radius_km: Search radius in kilometers when coordinates are provided.
         statuses: Optional comma-separated statuses such as "ACTIVE,MAINTENANCE".
-        limit: Maximum number of devices to return (default 100).
+        limit: Maximum number of devices to return (default 10).
 
     Returns:
         A text list of accessible devices, optionally constrained by status and/or location.
     """
-    if (latitude is None) != (longitude is None):
+    city_filter = city.strip()
+    use_city_filter = bool(city_filter)
+
+    if not use_city_filter and (latitude is None) != (longitude is None):
         return "Error: latitude and longitude must be provided together."
-    if latitude is not None and not (-90 <= latitude <= 90):
+    if not use_city_filter and latitude is not None and not (-90 <= latitude <= 90):
         return "Error: latitude must be between -90 and 90."
-    if longitude is not None and not (-180 <= longitude <= 180):
+    if not use_city_filter and longitude is not None and not (-180 <= longitude <= 180):
         return "Error: longitude must be between -180 and 180."
-    if radius_km <= 0:
+    if not use_city_filter and radius_km <= 0:
         return "Error: radius_km must be greater than 0."
     if limit <= 0:
         return "Error: limit must be greater than 0."
@@ -150,6 +159,7 @@ def find_nearby_lockers(
 
     try:
         devices, total = _search_tracking_devices(
+            city=city_filter if use_city_filter else None,
             latitude=latitude,
             longitude=longitude,
             radius_km=radius_km,
@@ -160,6 +170,8 @@ def find_nearby_lockers(
         return f"Error: unable to retrieve accessible devices (HTTP {exc.status_code})."
 
     if not devices:
+        if use_city_filter:
+            return f"No accessible devices found in city: {city_filter}."
         if latitude is not None and longitude is not None:
             return f"No accessible devices found within {radius_km} km of ({latitude}, {longitude})."
         if normalized_statuses:
@@ -169,7 +181,9 @@ def find_nearby_lockers(
     filters: list[str] = []
     if normalized_statuses:
         filters.append(f"statuses={','.join(normalized_statuses)}")
-    if latitude is not None and longitude is not None:
+    if use_city_filter:
+        filters.append(f"city={city_filter}")
+    elif latitude is not None and longitude is not None:
         filters.append(f"within={radius_km}km around ({latitude}, {longitude})")
 
     header = f"Found {len(devices)} accessible device(s)"
@@ -180,7 +194,7 @@ def find_nearby_lockers(
     header += ":"
 
     lines = [header]
-    include_distance = latitude is not None and longitude is not None
+    include_distance = (not use_city_filter) and latitude is not None and longitude is not None
     for device in devices:
         lines.append(_format_device_line(device, include_distance=include_distance))
 

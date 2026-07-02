@@ -91,6 +91,20 @@ def test_nearby_lockers_tool_response(authenticated_page):
 
 
 @pytest.mark.e2e
+def test_nearby_lockers_by_city_tool_response(authenticated_page):
+    response = send_and_wait(
+        authenticated_page,
+        "Find available lockers near London.",
+    )
+
+    assert response.assistant_text.strip(), "Assistant response is empty"
+    lowered = response.assistant_text.lower()
+    assert "locker" in lowered or "device" in lowered
+    assert "london" in lowered
+    assert_timing(response, wall_max_ms=45_000)
+
+
+@pytest.mark.e2e
 def test_accessible_devices_tool_response(authenticated_page):
     response = send_and_wait(
         authenticated_page,
